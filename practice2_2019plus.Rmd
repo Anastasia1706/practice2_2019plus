@@ -1,0 +1,131 @@
+---
+title: "Работа над ошибками (практика 2)"
+author: "Lukyanova Anastasia PMI IV-1"
+date: '16 марта 2019 г '
+output: word_document
+---
+
+```{r setup, message = F, warning = F}
+library('dplyr')
+library('lattice')
+library('ggplot2')
+library('data.table')
+```
+
+согласно заданию, необходимо построить три графика, каждый из которых выполнен в одной из графических библиотек: 'base', 'laticce' и 'ggplot'. На моих графиках будет изображена коробчатые диаграммы суммарной массы поставок с сентября по декабрь. Если будут обнаружены пропуски, они будут заменены на модельные значения.
+
+Первым шагом загрузим данные.
+```{r загрузка данных, warning = F}
+# загружаем файл с данными по импорту масла в РФ (из прошлой практики)
+fileURL <- 'https://raw.githubusercontent.com/aksyuk/R-data/master/COMTRADE/040510-Imp-RF-comtrade.csv'
+# создаём директорию для данных, если она ещё не существует:
+if (!file.exists('./data')) {
+  dir.create('./data')
+}
+# создаём файл с логом загрузок, если он ещё не существует:
+if (!file.exists('./data/download.log')) {
+  file.create('./data/download.log')
+}
+# загружаем файл, если он ещё не существует,
+#  и делаем запись о загрузке в лог:
+if (!file.exists('./data/040510-Imp-RF-comtrade.csv')) {
+  download.file(fileURL, './data/040510-Imp-RF-comtrade.csv')
+  # сделать запись в лог
+  write(paste('Файл "040510-Imp-RF-comtrade.csv" загружен', Sys.time()), 
+        file = './data/download.log', append = T)
+}
+# читаем данные из загруженного .csv во фрейм, если он ещё не существует
+if (!exists('DT')){
+  DT.import <- data.table(read.csv('./data/040510-Imp-RF-comtrade.csv', 
+                                   stringsAsFactors = F))
+}
+# предварительный просмотр
+dim(DT.import)            # размерность таблицы
+str(DT.import)            # структура (характеристики столбцов)
+DT.import          # удобный просмотр объекта data.table
+```
+
+Далее получим срез необходимых данных, запишем их в отдельную data.table, проверим на наличие пропусков, в случае их обнаружения, заполним их медианами.
+
+```{r первая обработка, warning=FALSE}
+# сколько месяцев в данных?
+unique(DT.import$Period.Desc)
+#фильтруем данные для получения необходимого среза данных
+(inform <- data.table(filter(DT.import, startsWith(Period.Desc, "September ")
+                             | startsWith(Period.Desc, "October ")
+                             | startsWith(Period.Desc, "November ") 
+                             | startsWith(Period.Desc, "December "))))
+
+#проверим количество пропусков
+na.num <- apply(inform, 2, function(x) length(which(is.na(x)))) 
+sort(na.num[na.num > 0], decreasing = T) #получили один пропуск
+
+
+
+# явное преобразование типа, чтобы избежать проблем 
+#  при заполнении пропусков
+inform[, Netweight.kg := as.double(Netweight.kg) ]
+
+x <- DT.import$Trade.Value.USD
+y <- DT.import$Netweight.kg
+
+y[y == 0] <- NA
+fit.log <- lm(log(y) ~ log(x))
+summary(fit.log) 
+
+inform[, Netweight.kg.model := Netweight.kg]
+# координаты пропущенных y по оси x
+NAs <- DT.import[is.na(Netweight.kg), Trade.Value.USD]
+# прогноз по модели на логарифмах сохраняем как вектор
+y.model.log <- predict(fit.log,
+                       newdata = data.frame(x = NAs))
+# пересчитываем в исходные единицы измерения y
+y.model <- exp(y.model.log)
+# заполняем пропуски модельными значениями
+inform[is.na(Netweight.kg.model),
+          Netweight.kg.model := round(y.model, 0)]
+```
+
+Соберем в отдельный data.table интересующие нас столбцы.
+
+```{r сбор, warning=FALSE}
+res <- select(inform, Netweight.kg.model,Year) %>%
+  group_by(Year) %>%
+  mutate(Netweight.kg.total = sum(Netweight.kg.model))
+head(res)
+```
+
+Построим графики, используя по очереди все 3 библиотеки. Сначала, библиотека base.
+
+```{r base, warning=F}
+png(filename = 'Pic-1_1.png', width = 500, height = 500)
+boxplot(res$Netweight.kg.total~as.factor(res$Year),
+        xlab = "Год", ylab="Суммарная поставка", col='red')
+dev.off()
+```
+
+Библиотека lattice.
+
+```{r lattice, warning=FALSE}
+png(filename = 'Pic-1_2.png', width = 500, height = 500)
+
+bwplot(Netweight.kg.total~Year, data=res, 
+       xlab = "Год", ylab="Суммарная поставка")
+
+dev.off()
+```
+
+Библиотека ggplot2
+
+```{r ggplot2, warning=FALSE}
+png(filename = 'Pic-1_3.png', width = 500, height = 500)
+
+gp <- ggplot(data = res, aes(x = as.factor(Year),
+                                    y = Netweight.kg.total))
+gp <- gp + geom_boxplot()
+gp <- gp + xlab('Год')
+gp <- gp + ylab('Суммарная поставка')
+gp
+
+dev.off()
+```
