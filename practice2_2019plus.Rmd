@@ -10,6 +10,8 @@ library('dplyr')
 library('lattice')
 library('ggplot2')
 library('data.table')
+library('zoo')
+library('lubridate')
 ```
 
 согласно заданию, необходимо построить три графика, каждый из которых выполнен в одной из графических библиотек: 'base', 'laticce' и 'ggplot'. На моих графиках будет изображена коробчатые диаграммы суммарной массы поставок с сентября по декабрь. Если будут обнаружены пропуски, они будут заменены на модельные значения.
@@ -84,14 +86,19 @@ y.model <- exp(y.model.log)
 # заполняем пропуски модельными значениями
 inform[is.na(Netweight.kg.model),
           Netweight.kg.model := round(y.model, 0)]
+#преобразуем дату
+inform[, Period.Date := ceiling_date(as.POSIXct(as.yearmon(as.character(Period),
+                                                        '%Y%m')),
+                                  unit = 'month') - days(1)] 
 ```
 
 Соберем в отдельный data.table интересующие нас столбцы.
 
 ```{r сбор, warning=FALSE}
-res <- select(inform, Netweight.kg.model,Year) %>%
-  group_by(Year) %>%
+res <- select(inform, Netweight.kg.model,Year,Reporter, Period.Date) %>%
+  group_by(Period.Date) %>%
   mutate(Netweight.kg.total = sum(Netweight.kg.model))
+
 head(res)
 ```
 
@@ -100,7 +107,7 @@ head(res)
 ```{r base, warning=F}
 png(filename = 'Pic-1_1.png', width = 500, height = 500)
 boxplot(res$Netweight.kg.total~as.factor(res$Year),
-        xlab = "Год", ylab="Суммарная поставка", col='red')
+        xlab = "Год", ylab="Суммарная поставка", col='green')
 dev.off()
 ```
 
@@ -109,7 +116,7 @@ dev.off()
 ```{r lattice, warning=FALSE}
 png(filename = 'Pic-1_2.png', width = 500, height = 500)
 
-bwplot(Netweight.kg.total~Year, data=res, 
+bwplot(Netweight.kg.total~as.factor(Year), data=res, 
        xlab = "Год", ylab="Суммарная поставка")
 
 dev.off()
@@ -121,7 +128,7 @@ dev.off()
 png(filename = 'Pic-1_3.png', width = 500, height = 500)
 
 gp <- ggplot(data = res, aes(x = as.factor(Year),
-                                    y = Netweight.kg.total))
+                             y = Netweight.kg.total))
 gp <- gp + geom_boxplot()
 gp <- gp + xlab('Год')
 gp <- gp + ylab('Суммарная поставка')
